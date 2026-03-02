@@ -176,18 +176,182 @@ class SyncService {
     debugPrint("✅ SyncService: Local database wiped clean.");
   }
 
+  // Future<void> forceSync() async {
+  //   debugPrint("⚡ SyncService: Force Sync initiated by user!");
+  //   await (_db.update(_db.syncQueue)..where((t) => t.status.equals('FAILED')))
+  //       .write(const SyncQueueCompanion(retryCount: drift.Value(0)));
+  //   await processQueue(_getUserId() ?? '');
+  // }
 
-
-
-  Future<void> forceSync() async {
+Future<void> forceSync() async {
     debugPrint("⚡ SyncService: Force Sync initiated by user!");
+    
+    // 1. Reset retries for FAILED items
     await (_db.update(_db.syncQueue)..where((t) => t.status.equals('FAILED')))
         .write(const SyncQueueCompanion(retryCount: drift.Value(0)));
+
+    // 2. THE FIX: Rescue items stuck in 'SYNCING' from a previous crash/restart
+    await (_db.update(_db.syncQueue)..where((t) => t.status.equals('SYNCING')))
+        .write(const SyncQueueCompanion(status: const drift.Value('PENDING')));
+
     await processQueue(_getUserId() ?? '');
   }
 
 
 
+  // // --- MANUAL CONFLICT RESOLUTION: KEEP MINE ---
+  // Future<void> resolveConflictKeepMine(
+  //   String queueId,
+  //   String entityType,
+  //   String entityId,
+  //   Map<String, dynamic> currentPayload,
+  // ) async {
+  //   debugPrint("🛡️ Conflict Resolved: Keeping Local Data");
+    
+  //   // 1. Generate a brand new timestamp for RIGHT NOW
+  //   final newTimestamp = DateTime.now().toUtc().toIso8601String();
+
+  //   // 2. Update the payload so the server will accept it as the newest write
+  //   currentPayload['updatedAt'] = newTimestamp;
+
+  //   await _db.transaction(() async {
+  //     // 3. Update the local SQLite entity's timestamp so everything matches
+  //     if (entityType == 'tasks') {
+  //       await (_db.update(_db.tasks)..where((t) => t.id.equals(entityId)))
+  //           .write(TasksCompanion(updatedAt: drift.Value(newTimestamp)));
+  //     } else if (entityType == 'boards') {
+  //       await (_db.update(_db.boards)..where((t) => t.id.equals(entityId)))
+  //           .write(BoardsCompanion(updatedAt: drift.Value(newTimestamp)));
+  //     } else if (entityType == 'columns') {
+  //       await (_db.update(_db.columns)..where((t) => t.id.equals(entityId)))
+  //           .write(ColumnsCompanion(updatedAt: drift.Value(newTimestamp)));
+  //     }
+
+  //     // 4. Reset the queue item back to PENDING with the new payload
+  //     await (_db.update(_db.syncQueue)..where((t) => t.queueId.equals(queueId)))
+  //         .write(SyncQueueCompanion(
+  //           status: const drift.Value('PENDING'),
+  //           retryCount: const drift.Value(0), // Reset retries
+  //           payload: drift.Value(jsonEncode(currentPayload)),
+  //         ));
+  //   });
+
+  //   // 5. Instantly trigger a sync to push your newly-stamped data to the server
+  //   forceSync();
+  // }
+
+
+// --- MANUAL CONFLICT RESOLUTION: KEEP MINE ---
+  Future<void> resolveConflictKeepMine(
+    String queueId,
+    String entityType,
+    String entityId,
+    Map<String, dynamic> currentPayload,
+    Map<String, dynamic> serverData, // Added serverData here
+  ) async {
+    debugPrint("🛡️ Conflict Resolved: Keeping Local Data");
+    
+    // THE FIX: Parse the server's "future" timestamp and add 1 second to it!
+    final serverTime = DateTime.parse(serverData['updatedAt']);
+    final newTimestamp = serverTime.add(const Duration(seconds: 1)).toUtc().toIso8601String();
+
+    // Update the payload so the server will accept it as the newest write
+    currentPayload['updatedAt'] = newTimestamp;
+
+    await _db.transaction(() async {
+      // Update the local SQLite entity's timestamp so everything matches
+      if (entityType == 'tasks') {
+        await (_db.update(_db.tasks)..where((t) => t.id.equals(entityId)))
+            .write(TasksCompanion(updatedAt: drift.Value(newTimestamp)));
+      } else if (entityType == 'boards') {
+        await (_db.update(_db.boards)..where((t) => t.id.equals(entityId)))
+            .write(BoardsCompanion(updatedAt: drift.Value(newTimestamp)));
+      } else if (entityType == 'columns') {
+        await (_db.update(_db.columns)..where((t) => t.id.equals(entityId)))
+            .write(ColumnsCompanion(updatedAt: drift.Value(newTimestamp)));
+      }
+
+      // Reset the queue item back to PENDING with the new payload
+      await (_db.update(_db.syncQueue)..where((t) => t.queueId.equals(queueId)))
+          .write(SyncQueueCompanion(
+            status: const drift.Value('PENDING'),
+            retryCount: const drift.Value(0),
+            payload: drift.Value(jsonEncode(currentPayload)),
+          ));
+    });
+
+    // Instantly trigger a sync to push your newly-stamped data to the server
+    forceSync();
+  }
+
+
+
+
+
+  // --- MANUAL CONFLICT RESOLUTION: USE CLOUD ---
+  Future<void> resolveConflictUseCloud(
+    String queueId,
+    String entityType,
+    Map<String, dynamic> serverData,
+  ) async {
+    debugPrint("☁️ Conflict Resolved: Overwriting local with Cloud Data");
+    
+    await _db.transaction(() async {
+      // 1. Overwrite the local SQLite database with the server's canonical data
+      if (entityType == 'tasks') {
+        DateTime? dueDateObj;
+        if (serverData['dueDate'] != null) {
+          dueDateObj = DateTime.tryParse(serverData['dueDate']);
+        }
+
+        await _db.into(_db.tasks).insertOnConflictUpdate(
+          TasksCompanion.insert(
+            id: serverData['_id'] ?? serverData['id'],
+            columnId: serverData['columnId'],
+            title: serverData['title'],
+            description: drift.Value(serverData['description'] ?? ''),
+            status: serverData['status'] ?? 'To Do',
+            priority: serverData['priority'] ?? 'Medium',
+            position: serverData['position'] ?? 0,
+            dueDate: drift.Value(dueDateObj?.millisecondsSinceEpoch),
+            isDeleted: drift.Value(serverData['isDeleted'] ?? false),
+            updatedAt: serverData['updatedAt'],
+            createdAt: serverData['createdAt'] ?? serverData['updatedAt'],
+          ),
+        );
+      } else if (entityType == 'boards') {
+        await _db.into(_db.boards).insertOnConflictUpdate(
+          BoardsCompanion.insert(
+            id: serverData['_id'] ?? serverData['id'],
+            title: serverData['title'],
+            color: drift.Value(serverData['color'] ?? '#3B82F6'),
+            isDeleted: drift.Value(serverData['isDeleted'] ?? false),
+            updatedAt: serverData['updatedAt'],
+            createdAt: serverData['createdAt'] ?? serverData['updatedAt'],
+          ),
+        );
+      } else if (entityType == 'columns') {
+        await _db.into(_db.columns).insertOnConflictUpdate(
+          ColumnsCompanion.insert(
+            id: serverData['_id'] ?? serverData['id'],
+            boardId: serverData['boardId'],
+            title: serverData['title'],
+            position: serverData['position'] ?? 0,
+            isDeleted: drift.Value(serverData['isDeleted'] ?? false),
+            updatedAt: serverData['updatedAt'],
+            createdAt: serverData['createdAt'] ?? serverData['updatedAt'],
+          ),
+        );
+      }
+
+      // // 2. Mark the queue item as SYNCED because we successfully applied the server's truth
+      // await (_db.update(_db.syncQueue)..where((t) => t.queueId.equals(queueId)))
+      //     .write(const drift.SyncQueueCompanion(status: drift.Value('SYNCED')));
+      // 2. Mark the queue item as SYNCED because we successfully applied the server's truth
+      await (_db.update(_db.syncQueue)..where((t) => t.queueId.equals(queueId)))
+          .write(const SyncQueueCompanion(status: drift.Value('SYNCED')));
+    });
+  }
 
   Future<void> processQueue(String userId) async {
     if (_isSyncing) return;

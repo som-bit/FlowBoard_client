@@ -46,7 +46,19 @@ class SyncStatusPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final queueAsync = ref.watch(syncQueueProvider);
+
+    ref.listen<AsyncValue<List<SyncQueueData>>>(syncQueueProvider, (previous, next) {
+      if (next.hasValue && next.value!.isEmpty && previous?.value?.isNotEmpty == true) {
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (context.mounted && Navigator.canPop(context)) {
+            Navigator.pop(context);
+          }
+        });
+      }
+    });
+
+        final queueAsync = ref.watch(syncQueueProvider);
+
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.7,

@@ -96,22 +96,51 @@ class KanbanCard extends StatelessWidget {
     );
   }
 
-  Widget _buildPriorityChip(String priority, Color color) {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 3.h),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(6.r),
-      ),
-      child: Text(
-        priority.toUpperCase(),
-        style: TextStyle(
-          color: color,
-          fontSize: 10.sp,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.5,
+
+
+
+  // Widget _buildPriorityChip(String priority, Color color) {
+  //   return Container(
+  //     padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 3.h),
+  //     decoration: BoxDecoration(
+  //       color: color.withOpacity(0.15),
+  //       borderRadius: BorderRadius.circular(6.r),
+  //     ),
+  //     child: Text(
+  //       priority.toUpperCase(),
+  //       style: TextStyle(
+  //         color: color,
+  //         fontSize: 10.sp,
+  //         fontWeight: FontWeight.bold,
+  //         letterSpacing: 0.5,
+  //       ),
+  //     ),
+  //   );
+  // }
+
+
+Widget _buildPriorityChip(String priority, Color color) {
+    return Flexible( // <--- Wrap in Flexible to prevent overflow
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 3.h),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(6.r),
+        ),
+        child: Text(
+          priority.toUpperCase(),
+          maxLines: 1, // <--- Keep it to one line
+          overflow: TextOverflow.ellipsis, // <--- Add ellipsis if it's too long
+          style: TextStyle(
+            color: color,
+            fontSize: 10.sp,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
+          ),
         ),
       ),
     );
   }
+
+
 }
