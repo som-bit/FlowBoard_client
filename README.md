@@ -39,9 +39,12 @@ The app uses **Riverpod 3.0** for reactive dependency injection and state manage
    ```bash
    flutter pub 
 2. Generate Drift Database files
-
+   ```bash
     flutter pub run build_runner build --delete-conflicting-outputs
 
 3. Open lib/core/network/api_client.dart and ensure the baseUrl matches your local Node.js server (e.g., http://10.0.2.2:3000/api for Android Emulator, or 127.0.0.1 for iOS).
 
-4. flutter run
+
+
+4. ```bash
+   flutter run
